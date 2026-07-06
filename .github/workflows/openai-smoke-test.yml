@@ -1,0 +1,66 @@
+name: OpenAI smoke test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-openai:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify OpenAI API access
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_API_BASE: ${{ secrets.OPENAI_API_BASE }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import sys
+          import urllib.error
+          import urllib.request
+
+          key = os.environ.get("OPENAI_API_KEY", "").strip()
+          base = (os.environ.get("OPENAI_API_BASE", "") or "https://api.openai.com/v1").strip().rstrip("/")
+
+          if not key:
+              print("OPENAI_API_KEY is empty")
+              sys.exit(1)
+
+          url = f"{base}/chat/completions"
+          payload = {
+              "model": "gpt-4o-mini",
+              "messages": [{"role": "user", "content": "Reply with exactly OK."}],
+              "max_tokens": 5,
+              "temperature": 0,
+          }
+          request = urllib.request.Request(
+              url,
+              data=json.dumps(payload).encode("utf-8"),
+              headers={
+                  "Authorization": f"Bearer {key}",
+                  "Content-Type": "application/json",
+              },
+              method="POST",
+          )
+
+          try:
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  body = response.read().decode("utf-8", errors="replace")
+                  data = json.loads(body)
+                  text = data["choices"][0]["message"]["content"].strip()
+                  print("OpenAI API smoke test succeeded")
+                  print(f"HTTP {response.status}; model replied: {text!r}")
+          except urllib.error.HTTPError as error:
+              body = error.read().decode("utf-8", errors="replace")
+              if key:
+                  body = body.replace(key, "[REDACTED_KEY]")
+              print(f"OpenAI API smoke test failed: HTTP {error.code}")
+              print(body[:1200])
+              sys.exit(1)
+          except Exception as error:
+              print(f"OpenAI API smoke test failed: {type(error).__name__}: {error}")
+              sys.exit(1)
+          PY
